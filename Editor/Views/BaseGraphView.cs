@@ -16,6 +16,8 @@ namespace GraphProcessor
 {
 	public class BaseGraphView : GraphView
 	{
+		public delegate void ComputeOrderUpdatedDelegate();
+
 		public BaseGraph							graph;
 
 		public EdgeConnectorListener				connectorListener;
@@ -27,7 +29,7 @@ namespace GraphProcessor
 
 		Dictionary< Type, PinnedElementView >		pinnedElements = new Dictionary< Type, PinnedElementView >();
 
-		public delegate void ComputeOrderUpdatedDelegate();
+		CreateNodeMenuWindow						createNodeMenu;
 
 		public event Action							initialized;
 		public event ComputeOrderUpdatedDelegate	computeOrderUpdated;
@@ -37,7 +39,7 @@ namespace GraphProcessor
 		public event Action				onExposedParameterListChanged;
 		public event Action< string >	onExposedParameterModified;
 
-		public BaseGraphView()
+		public BaseGraphView(EditorWindow window)
 		{
 			serializeGraphElements = SerializeGraphElementsCallback;
 			canPasteSerializedData = CanPasteSerializedDataCallback;
@@ -55,6 +57,9 @@ namespace GraphProcessor
 			SetupZoom(0.05f, 2f);
 
 			Undo.undoRedoPerformed += ReloadView;
+
+			createNodeMenu = ScriptableObject.CreateInstance< CreateNodeMenuWindow >();
+			createNodeMenu.Initialize(this, window);
 
 			this.StretchToParentSize();
 		}
@@ -116,6 +121,9 @@ namespace GraphProcessor
 			foreach (var serializedNode in data.copiedNodes)
 			{
 				var node = JsonSerializer.DeserializeNode(serializedNode);
+
+				if (node == null)
+					continue ;
 
 				//Call OnNodeCreated on the new fresh copied node
 				node.OnNodeCreated();
@@ -241,7 +249,7 @@ namespace GraphProcessor
 
 		public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
 		{
-			BuildCreateContextualMenu(evt);
+			BuildCommentBlockContextualMenu(evt);
 			BuildViewContextualMenu(evt);
 			base.BuildContextualMenu(evt);
 			BuildSelectAssetContextualMenu(evt);
@@ -249,10 +257,10 @@ namespace GraphProcessor
 			BuildHelpContextualMenu(evt);
 		}
 
-		protected void BuildCreateContextualMenu(ContextualMenuPopulateEvent evt)
+		protected void BuildCommentBlockContextualMenu(ContextualMenuPopulateEvent evt)
 		{
 			Vector2 position = evt.mousePosition - (Vector2)viewTransform.position;
-            evt.menu.AppendAction("Create/Comment Block", (e) => AddCommentBlock(new CommentBlock("New Comment Block", position)), DropdownMenuAction.AlwaysEnabled);
+            evt.menu.AppendAction("Comment Block", (e) => AddSelectionsToCommentBlock(AddCommentBlock(new CommentBlock("New Comment Block", position))), DropdownMenuAction.AlwaysEnabled);
 		}
 
 		protected void BuildViewContextualMenu(ContextualMenuPopulateEvent evt)
@@ -283,7 +291,7 @@ namespace GraphProcessor
 
 		void KeyDownCallback(KeyDownEvent e)
 		{
-			if (e.keyCode == KeyCode.S)
+			if (e.keyCode == KeyCode.S && e.commandKey)
 			{
 				SaveGraphToDisk();
 				e.StopPropagation();
@@ -304,7 +312,7 @@ namespace GraphProcessor
 				foreach (var paramFieldView in exposedParameterFieldViews)
 				{
 					var paramNode = BaseNode.CreateFromType< ParameterNode >(mousePos);
-					paramNode.parameterName = paramFieldView.parameter.name;
+					paramNode.parameterGUID = paramFieldView.parameter.guid;
 					AddNode(paramNode);
 				}
 			}
@@ -372,8 +380,9 @@ namespace GraphProcessor
 
 			UpdateComputeOrder();
 
-			if (initialized != null)
-				initialized();
+			initialized?.Invoke();
+
+			InitializeView();
 		}
 
 		void InitializeGraphView()
@@ -382,6 +391,7 @@ namespace GraphProcessor
 			graph.onExposedParameterModified += (s) => onExposedParameterModified?.Invoke(s);
 			viewTransform.position = graph.position;
 			viewTransform.scale = graph.scale;
+			nodeCreationRequest = (c) => SearchWindow.Open(new SearchWindowContext(c.screenMousePosition), createNodeMenu);
 		}
 
 		void InitializeNodeViews()
@@ -389,7 +399,9 @@ namespace GraphProcessor
 			graph.nodes.RemoveAll(n => n == null);
 
 			foreach (var node in graph.nodes)
-				AddNodeView(node);
+			{
+				var v = AddNodeView(node);
+			}
 		}
 
 		void InitializeEdgeViews()
@@ -437,7 +449,7 @@ namespace GraphProcessor
 
 		#region Graph content modification
 
-		protected bool AddNode(BaseNode node)
+		public bool AddNode(BaseNode node)
 		{
 			// This will initialize the node using the graph instance
 			graph.AddNode(node);
@@ -477,14 +489,14 @@ namespace GraphProcessor
 			nodeViewsPerNode.Clear();
 		}
 
-        public void AddCommentBlock(CommentBlock block)
+        public CommentBlockView AddCommentBlock(CommentBlock block)
         {
             graph.AddCommentBlock(block);
             block.OnCreated();
-            AddCommentBlockView(block);
+            return AddCommentBlockView(block);
         }
 
-		public void AddCommentBlockView(CommentBlock block)
+		public CommentBlockView AddCommentBlockView(CommentBlock block)
 		{
 			var c = new CommentBlockView();
 
@@ -493,7 +505,22 @@ namespace GraphProcessor
 			AddElement(c);
 
             commentBlockViews.Add(c);
+            return c;
 		}
+
+        public void AddSelectionsToCommentBlock(CommentBlockView view)
+        {
+            foreach (var selectedNode in selection)
+            {
+                if (selectedNode is BaseNodeView)
+                {
+                    if (commentBlockViews.Exists(x => x.ContainsElement(selectedNode as BaseNodeView)))
+                        continue;
+
+                    view.AddElement(selectedNode as BaseNodeView);
+                }
+            }
+        }
 
 		public void RemoveCommentBlocks()
 		{
@@ -528,11 +555,8 @@ namespace GraphProcessor
 
 			if (serializeToGraph)
 			{
-				NodePort inputPort = inputNodeView.nodeTarget.inputPorts.FirstOrDefault(o => o.portData.displayName == inputPortView.portData.displayName);
+				NodePort inputPort = inputNodeView.nodeTarget.inputPorts.FirstOrDefault(o => o.portData.identifier == inputPortView.portData.identifier);
 				NodePort outputPort = outputNodeView.nodeTarget.outputPorts.FirstOrDefault(o => o.portData == outputPortView.portData);
-
-				Debug.Log("output port: " + outputPort.portData.displayName);
-				Debug.Log("input port: " + inputPort.portData.displayName);
 
 				e.userData = graph.Connect(inputPort, outputPort);
 			}
@@ -623,6 +647,9 @@ namespace GraphProcessor
 
 		public void SaveGraphToDisk()
 		{
+			if (graph == null)
+				return ;
+
 			EditorUtility.SetDirty(graph);
 		}
 
@@ -701,6 +728,17 @@ namespace GraphProcessor
 			graph.scale = Vector3.one;
 
 			UpdateViewTransform(graph.position, graph.scale);
+		}
+
+		protected virtual void InitializeView() {}
+
+		public virtual IEnumerable< KeyValuePair< string, Type > > FilterCreateNodeMenuEntries()
+		{
+			// By default we don't filter anything
+			foreach (var nodeMenuItem in NodeProvider.GetNodeMenuEntries())
+				yield return nodeMenuItem;
+
+			// TODO: add exposed properties to this list
 		}
 
 		#endregion

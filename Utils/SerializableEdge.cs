@@ -62,6 +62,9 @@ namespace GraphProcessor
 
 		public void OnBeforeSerialize()
 		{
+			if (outputNode == null || inputNode == null)
+				return;
+
 			outputNodeGUID = outputNode.GUID;
 			inputNodeGUID = inputNode.GUID;
 		}
@@ -71,10 +74,13 @@ namespace GraphProcessor
 		//here our owner have been deserialized
 		public void Deserialize()
 		{
+			if (!owner.nodesPerGUID.ContainsKey(outputNodeGUID) || !owner.nodesPerGUID.ContainsKey(inputNodeGUID))
+				return ;
+
 			outputNode = owner.nodesPerGUID[outputNodeGUID];
 			inputNode = owner.nodesPerGUID[inputNodeGUID];
-			inputPort = inputNode.GetPort(inputFieldName);
-			outputPort = outputNode.GetPort(outputFieldName);
+			inputPort = inputNode.GetPort(inputFieldName, inputPortIdentifier);
+			outputPort = outputNode.GetPort(outputFieldName, outputPortIdentifier);
 		}
 	}
 }

@@ -56,11 +56,14 @@ namespace GraphProcessor
 		public event Action< string >	onExposedParameterModified;
 		public event Action				onEnabled;
 
+		public event Action< BaseNode >	onNodeRemoved;
+		public event Action< BaseNode > onNodeAdded;
+
 		[System.NonSerialized]
 		bool _isEnabled = false;
 		public bool isEnabled { get => _isEnabled; private set => _isEnabled = value; }
 
-        void OnEnable()
+        protected virtual void OnEnable()
         {
 			Deserialize();
 
@@ -70,15 +73,20 @@ namespace GraphProcessor
 			onEnabled?.Invoke();
         }
 
-		public void AddNode(BaseNode node)
+		public BaseNode AddNode(BaseNode node)
 		{
-			node.Initialize(this);
 			nodes.Add(node);
+			node.Initialize(this);
+
+			onNodeAdded?.Invoke(node);
+
+			return node;
 		}
 
 		public void RemoveNode(BaseNode node)
 		{
 			nodes.Remove(node);
+			onNodeRemoved?.Invoke(node);
 		}
 
 		public SerializableEdge Connect(NodePort inputPort, NodePort outputPort)
@@ -150,17 +158,26 @@ namespace GraphProcessor
 		{
 			nodes.Clear();
 
-			foreach (var serializedNode in serializedNodes)
+			foreach (var serializedNode in serializedNodes.ToList())
 			{
 				var node = JsonSerializer.DeserializeNode(serializedNode) as BaseNode;
+				if (node == null)
+				{
+					serializedNodes.Remove(serializedNode);
+					continue ;
+				}
 				AddNode(node);
 				nodesPerGUID[node.GUID] = node;
 			}
 
-			foreach (var edge in edges)
+			foreach (var edge in edges.ToList()) // Copy
 			{
 				edge.Deserialize();
 				edgesPerGUID[edge.GUID] = edge;
+
+				// Sanity check for the edge:
+				if (edge.inputPort == null || edge.outputPort == null)
+					Disconnect(edge.GUID);
 			}
 		}
 
@@ -227,6 +244,11 @@ namespace GraphProcessor
 		public ExposedParameter GetExposedParameter(string name)
 		{
 			return exposedParameters.FirstOrDefault(e => e.name == name);
+		}
+
+		public ExposedParameter GetExposedParameterFromGUID(string guid)
+		{
+			return exposedParameters.FirstOrDefault(e => e.guid == guid);
 		}
 
 		int UpdateComputeOrder(int depth, BaseNode node)

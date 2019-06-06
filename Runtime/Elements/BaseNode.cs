@@ -15,6 +15,8 @@ namespace GraphProcessor
 	{
 		public virtual string       name => GetType().Name;
 
+        public virtual string       layoutStyle => string.Empty;
+
 		//id
 		public string				GUID;
 
@@ -88,14 +90,6 @@ namespace GraphProcessor
 			this.graph = graph;
 
 			Enable();
-		}
-
-		protected BaseNode()
-		{
-			InitializeInOutDatas();
-
-			inputPorts = new NodeInputPortContainer(this);
-			outputPorts = new NodeOutputPortContainer(this);
 
 			foreach (var nodeFieldKP in nodeFields)
 			{
@@ -113,7 +107,21 @@ namespace GraphProcessor
 			}
 		}
 
-		void UpdatePortsForField(string fieldName)
+		protected BaseNode()
+		{
+			inputPorts = new NodeInputPortContainer(this);
+			outputPorts = new NodeOutputPortContainer(this);
+
+			InitializeInOutDatas();
+		}
+
+		public void UpdateAllPorts()
+		{
+			foreach (var field in nodeFields)
+				UpdatePortsForField(field.Value.fieldName);
+		}
+
+		public void UpdatePortsForField(string fieldName)
 		{
 			var fieldInfo = nodeFields[fieldName];
 
@@ -131,14 +139,16 @@ namespace GraphProcessor
 
 			foreach (var portData in fieldInfo.behavior(edges))
 			{
+				var port = nodePorts.FirstOrDefault(n => n.portData.identifier == portData.identifier);
 				// Guard using the port identifier so we don't duplicate identifiers
-				if (!nodePorts.Any(n => n.portData.identifier == portData.identifier))
+				if (port == null)
 				{
 					AddPort(fieldInfo.input, fieldName, portData);
 				}
 				else
 				{
-					// TODO: patch the name of the ports
+					// patch the port datas
+					port.portData = portData;
 				}
 
 				finalPorts.Add(portData.identifier);
@@ -310,9 +320,12 @@ namespace GraphProcessor
 					yield return edge.inputNode;
 		}
 
-		public NodePort	GetPort(string fieldName)
+		public NodePort	GetPort(string fieldName, string identifier)
 		{
-			return inputPorts.Concat(outputPorts).FirstOrDefault(p => p.fieldName == fieldName);
+			return inputPorts.Concat(outputPorts).FirstOrDefault(p => {
+				var bothNull = String.IsNullOrEmpty(identifier) && String.IsNullOrEmpty(p.portData.identifier);
+				return p.fieldName == fieldName && (bothNull || identifier == p.portData.identifier);
+			});
 		}
 
 		#endregion

@@ -44,7 +44,10 @@ namespace GraphProcessor
 
 			owner.computeOrderUpdated += ComputeOrderUpdatedCallback;
 
-			styleSheets.Add(Resources.Load<StyleSheet>(baseNodeStyle));
+            styleSheets.Add(Resources.Load<StyleSheet>(baseNodeStyle));
+
+            if (!string.IsNullOrEmpty(node.layoutStyle))
+                styleSheets.Add(Resources.Load<StyleSheet>(node.layoutStyle));
 
 			InitializePorts();
 			InitializeView();
@@ -148,7 +151,8 @@ namespace GraphProcessor
 		public void RemovePort(PortView p)
 		{
 			// Remove all connected edges:
-			foreach (var e in p.GetEdges())
+			var edgesCopy = p.GetEdges().ToList();
+			foreach (var e in edgesCopy)
 				owner.Disconnect(e, refreshPorts: false);
 
 			if (p.direction == Direction.Input)
@@ -304,12 +308,12 @@ namespace GraphProcessor
 			return Status.Disabled;
 		}
 
-		void UpdatePortViews(IEnumerable< NodePort > ports, IEnumerable< PortView > portViews)
+		void SyncPortCounts(IEnumerable< NodePort > ports, IEnumerable< PortView > portViews)
 		{
 			var listener = owner.connectorListener;
 
 			// Maybe not good to remove ports as edges are still connected :/
-			foreach (var pv in portViews)
+			foreach (var pv in portViews.ToList())
 			{
 				// If the port have disepeared from the node datas, we remove the view:
 				// We can use the identifier here because this function will only be called when there is a custom port behavior
@@ -330,30 +334,47 @@ namespace GraphProcessor
 			// If a port behavior was attached to one port, then
 			// the port count might have been updated by the node
 			// so we have to refresh the list of port views.
-			if (nodeTarget.inputPorts.Count != inputPortViews.Count)
+			UpdatePortViewWithPorts(nodeTarget.inputPorts, inputPortViews);
+			UpdatePortViewWithPorts(nodeTarget.outputPorts, outputPortViews);
+
+			void UpdatePortViewWithPorts(NodePortContainer ports, List< PortView > portViews)
 			{
-				var ports = nodeTarget.inputPorts.GroupBy(n => n.fieldName);
-				var portViews = inputPortViews.GroupBy(v => v.fieldName);
-				ports.Zip(portViews, (portPerFieldName, portViewPerFieldName) => {
-					if (portPerFieldName.Count() != portViewPerFieldName.Count())
-						UpdatePortViews(portPerFieldName, portViewPerFieldName);
-					// We don't care about the result, we just iterate over port and portView
-					return "";
-				}).ToList();
-			}
-			if (nodeTarget.outputPorts.Count != outputPortViews.Count)
-			{
-				var ports = nodeTarget.outputPorts.GroupBy(n => n.fieldName);
-				var portViews = outputPortViews.GroupBy(v => v.fieldName);
-				ports.Zip(portViews, (portPerFieldName, portViewPerFieldName) => {
-					if (portPerFieldName.Count() != portViewPerFieldName.Count())
-						UpdatePortViews(portPerFieldName, portViewPerFieldName);
-					// We don't care about the result, we just iterate over port and portView
-					return "";
-				});
+				// When there is no current portviews, we can't zip the list so we just add all
+				if (portViews.Count == 0)
+					SyncPortCounts(ports, new PortView[]{});
+				else if (ports.Count == 0) // Same when there is no ports
+					SyncPortCounts(new NodePort[]{}, portViews);
+				else
+				{
+					var p = ports.GroupBy(n => n.fieldName);
+					var pv = portViews.GroupBy(v => v.fieldName);
+					p.Zip(pv, (portPerFieldName, portViewPerFieldName) => {
+						if (portPerFieldName.Count() != portViewPerFieldName.Count())
+							SyncPortCounts(portPerFieldName, portViewPerFieldName);
+						// We don't care about the result, we just iterate over port and portView
+						return "";
+					}).ToList();
+				}
+
+				// Here we're sure that we have the same amout of port and portView
+				// so we can update the view with the new port datas (if the name of a port have been changed for example)
+
+				for (int i = 0; i < portViews.Count; i++)
+				{
+					var pv = portViews[i];
+
+					pv.UpdatePortView(ports[i].portData.displayName, ports[i].portData.displayType);
+				}
 			}
 
 			return base.RefreshPorts();
+		}
+
+		protected void ForceUpdatePorts()
+		{
+			nodeTarget.UpdateAllPorts();
+
+			RefreshPorts();
 		}
 
 		#endregion
