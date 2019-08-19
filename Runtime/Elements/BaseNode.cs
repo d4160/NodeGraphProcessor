@@ -41,9 +41,14 @@ namespace GraphProcessor
         public delegate void		ProcessDelegate();
 
 		public event ProcessDelegate	onProcessed;
+		public event Action< string, NodeMessageType >	onMessageAdded;
+		public event Action< string >					onMessageRemoved;
 
 		[NonSerialized]
 		Dictionary< string, NodeFieldInformation >	nodeFields = new Dictionary< string, NodeFieldInformation >();
+
+		[NonSerialized]
+		List< string >				messages = new List< string >();
 
 		[NonSerialized]
 		protected BaseGraph			graph;
@@ -126,6 +131,10 @@ namespace GraphProcessor
 				UpdatePortsForField(field.Value.fieldName);
 		}
 
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="fieldName"></param>
 		public void UpdatePortsForField(string fieldName)
 		{
 			var fieldInfo = nodeFields[fieldName];
@@ -152,6 +161,13 @@ namespace GraphProcessor
 				}
 				else
 				{
+					// in case the port type have changed for an incompatible type, we disconnect all the edges attached to this port
+					if (!BaseGraph.TypesAreConnectable(port.portData.displayType, portData.displayType))
+					{
+						foreach (var edge in port.GetEdges().ToList())
+							graph.Disconnect(edge.GUID);
+					}
+
 					// patch the port datas
 					port.portData = portData;
 				}
@@ -168,9 +184,7 @@ namespace GraphProcessor
 				{
 					// If the current port does not appear in the list of final ports, we remove it
 					if (!finalPorts.Any(id => id == currentPort.portData.identifier))
-					{
 						RemovePort(fieldInfo.input, currentPort);
-					}
 				}
 			}
 		}
@@ -205,7 +219,7 @@ namespace GraphProcessor
 					continue ;
 
 				//check if field is a collection type
-				isMultiple = (inputAttribute != null) ? inputAttribute.allowMultiple : false;
+				isMultiple = (inputAttribute != null) ? inputAttribute.allowMultiple : (outputAttribute.allowMultiple);
 				input = inputAttribute != null;
 
 				if (!String.IsNullOrEmpty(inputAttribute?.name))
@@ -230,7 +244,7 @@ namespace GraphProcessor
 					var referenceType = typeof(CustomPortBehaviorDelegate);
 					behavior = (CustomPortBehaviorDelegate)Delegate.CreateDelegate(referenceType, this, method, true);
 				} catch {
-					Debug.LogError("The function " + method + " can be converted to the required delegate format: " + typeof(CustomPortBehaviorDelegate));
+					Debug.LogError("The function " + method + " cannot be converted to the required delegate format: " + typeof(CustomPortBehaviorDelegate));
 				}
 
 				if (nodeFields.ContainsKey(customPortBehaviorAttribute.fieldName))
@@ -316,7 +330,7 @@ namespace GraphProcessor
 			foreach (var port in inputPorts)
 				foreach (var edge in port.GetEdges())
 					yield return edge.outputNode;
-		}
+			}
 
 		public IEnumerable< BaseNode > GetOutputNodes()
 		{
@@ -331,6 +345,23 @@ namespace GraphProcessor
 				var bothNull = String.IsNullOrEmpty(identifier) && String.IsNullOrEmpty(p.portData.identifier);
 				return p.fieldName == fieldName && (bothNull || identifier == p.portData.identifier);
 			});
+		}
+
+		public bool IsFieldInput(string fieldName) => nodeFields[fieldName].input;
+
+		public void AddMessage(string message, NodeMessageType messageType)
+		{
+			onMessageAdded?.Invoke(message, messageType);
+			messages.Add(message);
+		}
+
+		public void RemoveMessage(string message) => onMessageRemoved?.Invoke(message);
+
+		public void ClearMessages()
+		{
+			foreach (var message in messages)
+				onMessageRemoved?.Invoke(message);
+			messages.Clear();
 		}
 
 		#endregion

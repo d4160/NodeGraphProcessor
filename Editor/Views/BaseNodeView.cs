@@ -38,13 +38,16 @@ namespace GraphProcessor
 
 		protected virtual bool					hasSettings => false;
 
-        public bool initializing = false; //Used for applying SetPosition on locked node at init.
+        public bool								initializing = false; //Used for applying SetPosition on locked node at init.
 
         readonly string							baseNodeStyle = "GraphProcessorStyles/BaseNodeView";
 
 		bool									settingsExpanded = false;
 
-		#region  Initialization
+		[System.NonSerialized]
+		List< IconBadge >						badges = new List< IconBadge >();
+
+			#region  Initialization
 
 		public void Initialize(BaseGraphView owner, BaseNode node)
 		{
@@ -52,6 +55,8 @@ namespace GraphProcessor
 			this.owner = owner;
 
 			owner.computeOrderUpdated += ComputeOrderUpdatedCallback;
+			node.onMessageAdded += AddMessageView;
+			node.onMessageRemoved += RemoveMessageView;
 
             styleSheets.Add(Resources.Load<StyleSheet>(baseNodeStyle));
 
@@ -264,6 +269,54 @@ namespace GraphProcessor
 				mainContainer.Remove(debugContainer);
 		}
 
+		public void AddMessageView(string message, Texture icon, Color color)
+			=> AddBadge(new NodeBadgeView(message, icon, color));
+
+		public void AddMessageView(string message, NodeMessageType messageType)
+		{
+			IconBadge	badge = null;
+			switch (messageType)
+			{
+				case NodeMessageType.Warning:
+					badge = new NodeBadgeView(message, EditorGUIUtility.IconContent("Collab.Warning").image, Color.yellow);
+					break ;
+				case NodeMessageType.Error:	
+					badge = IconBadge.CreateError(message);
+					break ;
+				case NodeMessageType.Info:
+					badge = IconBadge.CreateComment(message);
+					break ;
+				default:
+				case NodeMessageType.None:
+					badge = new NodeBadgeView(message, null, Color.grey);
+					break ;
+			}
+			
+			AddBadge(badge);
+		}
+
+		void AddBadge(IconBadge badge)
+		{
+			badge.distance = (int)style.width.value.value;
+
+			Add(badge);
+			badges.Add(badge);
+			badge.AttachTo(topContainer, SpriteAlignment.TopRight);
+		}
+
+		public void RemoveMessageView(string message)
+		{
+			badges.RemoveAll(b => {
+				if (b.badgeText == message)
+				{
+					b.Detach();
+					b.RemoveFromHierarchy();
+					return true;
+				}
+				return false;
+			});
+		}
+
 		#endregion
 
 		#region Callbacks & Overrides
@@ -310,12 +363,12 @@ namespace GraphProcessor
 			}
 		}
 
-		public void OnPortConnected(PortView port)
+		internal void OnPortConnected(PortView port)
 		{
 			onPortConnected?.Invoke(port);
 		}
 
-		public void OnPortDisconnected(PortView port)
+		internal void OnPortDisconnected(PortView port)
 		{
 			onPortDisconnected?.Invoke(port);
 		}
@@ -404,9 +457,34 @@ namespace GraphProcessor
 			{
 				// Add missing port views
 				if (!portViews.Any(pv => p.portData.identifier == pv.portData.identifier))
-					AddPort(p.fieldInfo, Direction.Input, listener, p.portData);
+				{
+					Direction portDirection = nodeTarget.IsFieldInput(p.fieldName) ? Direction.Input : Direction.Output;
+					AddPort(p.fieldInfo, portDirection, listener, p.portData);
+				}
 			}
 		}
+
+		// void UpdatePortConnections(List< PortView > portViews)
+		// {
+		// 	foreach (var pv in portViews)
+		// 	{
+		// 		Debug.Log("pv: " + pv.portName);
+				
+		// 		// Go over all connected edges and disconnect them if the serialized edge have been removed
+		// 		// This can happens when the new port type is incompatible with the old one.
+		// 		foreach (var edge in pv.GetEdges().ToList())
+		// 		{
+		// 			// TODO: check edge connection compatibility !
+		// 			Debug.Log("Edge !");
+		// 			if (owner.graph.edges.Contains(edge.serializedEdge))
+		// 			{
+		// 				owner.Disconnect(edge);
+		// 				// owner.RemoveElement(edge);
+		// 				// base.RefreshPorts(); // We don't call this.RefreshPorts because it will cause an infinite loop
+		// 			}
+		// 		}
+		// 	}
+		// }
 
 		public new bool RefreshPorts()
 		{
@@ -430,6 +508,7 @@ namespace GraphProcessor
 					p.Zip(pv, (portPerFieldName, portViewPerFieldName) => {
 						if (portPerFieldName.Count() != portViewPerFieldName.Count())
 							SyncPortCounts(portPerFieldName, portViewPerFieldName);
+						// UpdatePortConnections(portViewPerFieldName.ToList());
 						// We don't care about the result, we just iterate over port and portView
 						return "";
 					}).ToList();
