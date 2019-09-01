@@ -156,7 +156,7 @@ namespace GraphProcessor
 				if (r.GUID == edgeGUID)
 				{
 					onGraphChanges?.Invoke(new GraphChanges{ removedEdge = r });
-					r.inputNode?.OnEdgeDisonnected(r);
+					r.inputNode?.OnEdgeDisconnected(r);
 				}
 				return r.GUID == edgeGUID;
 			});
@@ -234,7 +234,7 @@ namespace GraphProcessor
 					continue;
 				}
 
-				// Add the edge to the non-serialized port datas
+				// Add the edge to the non-serialized port data
 				edge.inputPort.owner.OnEdgeConnected(edge);
 				edge.outputPort.owner.OnEdgeConnected(edge);
 			}
@@ -310,6 +310,22 @@ namespace GraphProcessor
 			return exposedParameters.FirstOrDefault(e => e.guid == guid);
 		}
 
+		public bool SetParameterValue(string name, object value)
+		{
+			var e = exposedParameters.FirstOrDefault(p => p.name == name);
+
+			if (e == null)
+				return false;
+
+			e.serializedValue.value = value;
+
+			return true;
+		}
+
+		public object GetParameterValue(string name) => exposedParameters.FirstOrDefault(p => p.name == name)?.serializedValue?.value;
+
+		public T GetParameterValue< T >(string name) => (T)GetParameterValue(name);
+
 		int UpdateComputeOrder(int depth, BaseNode node)
 		{
 			int computeOrder = 0;
@@ -376,6 +392,10 @@ namespace GraphProcessor
 
 			//Check for type assignability
 			if (t2.IsReallyAssignableFrom(t1))
+				return true;
+
+			// User defined type convertions
+			if (TypeAdapter.AreAssignable(t1, t2))
 				return true;
 
 			return false;
