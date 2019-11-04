@@ -57,7 +57,9 @@ namespace GraphProcessor
 			// Correct port type if port accept multiple values (and so is a container)
 			if (direction == Direction.Input && portData.acceptMultipleEdges && portType == fieldType) // If the user haven't set a custom field type
 			{
-				portType = fieldType.GetGenericArguments()[0];
+				var argsTypes = fieldType.GetGenericArguments();
+				if (argsTypes.Length > 0)
+					portType = argsTypes[0];
 			}
 
 			if (name != null)
