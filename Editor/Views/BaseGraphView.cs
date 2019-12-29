@@ -7,6 +7,7 @@ using UnityEngine.UIElements;
 using UnityEditor.Experimental.GraphView;
 using System.Linq;
 using System;
+using UnityEditor.SceneManagement;
 
 using Status = UnityEngine.UIElements.DropdownMenuAction.Status;
 
@@ -48,11 +49,12 @@ namespace GraphProcessor
 			viewTransformChanged = ViewTransformChangedCallback;
             elementResized = ElementResizedCallback;
 
-			InitializeManipulators();
-
 			RegisterCallback< KeyDownEvent >(KeyDownCallback);
 			RegisterCallback< DragPerformEvent >(DragPerformedCallback);
 			RegisterCallback< DragUpdatedEvent >(DragUpdatedCallback);
+			RegisterCallback< MouseDownEvent >(MouseDownCallback);
+
+			InitializeManipulators();
 
 			SetupZoom(0.05f, 2f);
 
@@ -296,6 +298,16 @@ namespace GraphProcessor
 			}
 		}
 
+		void MouseDownCallback(MouseDownEvent e)
+		{
+			// When left clicking on the graph (not a node or something else)
+			if (e.button == 0)
+			{
+				// Close all settings windows:
+				nodeViews.ForEach(v => v.CloseSettings());
+			}
+		}
+
 		void DragPerformedCallback(DragPerformEvent e)
 		{
 			var mousePos = (e.currentTarget as VisualElement).ChangeCoordinatesTo(contentViewContainer, e.localMousePosition);
@@ -370,6 +382,9 @@ namespace GraphProcessor
 
             connectorListener = new EdgeConnectorListener(this);
 
+			// When pressing ctrl-s, we save the graph
+			EditorSceneManager.sceneSaved += _ => SaveGraphToDisk();
+
 			InitializeGraphView();
 			InitializeNodeViews();
 			InitializeEdgeViews();
@@ -407,8 +422,11 @@ namespace GraphProcessor
 		{
 			foreach (var serializedEdge in graph.edges)
 			{
-				var inputNodeView = nodeViewsPerNode[serializedEdge.inputNode];
-				var outputNodeView = nodeViewsPerNode[serializedEdge.outputNode];
+				nodeViewsPerNode.TryGetValue(serializedEdge.inputNode, out var inputNodeView);
+				nodeViewsPerNode.TryGetValue(serializedEdge.outputNode, out var outputNodeView);
+				if (inputNodeView == null || outputNodeView == null)
+					continue;
+
 				var edgeView = new EdgeView() {
 					userData = serializedEdge,
 					input = inputNodeView.GetPortViewFromFieldName(serializedEdge.inputFieldName, serializedEdge.inputPortIdentifier),
@@ -439,7 +457,6 @@ namespace GraphProcessor
 			this.AddManipulator(new ContentDragger());
 			this.AddManipulator(new SelectionDragger());
 			this.AddManipulator(new RectangleSelector());
-			this.AddManipulator(new ClickSelector());
 		}
 
 		protected virtual void Reload() {}
@@ -455,10 +472,10 @@ namespace GraphProcessor
 
 			var view = AddNodeView(node);
 
-			UpdateComputeOrder();
-
 			// Call create after the node have been initialized
 			view.OnCreated();
+
+			UpdateComputeOrder();
 
 			return true;
 		}
@@ -640,10 +657,9 @@ namespace GraphProcessor
 
 			// Remove the serialized edge if there is one
 			if (e.userData is SerializableEdge serializableEdge)
-			{
 				graph.Disconnect(serializableEdge.GUID);
-				UpdateComputeOrder();
-			}
+
+			UpdateComputeOrder();
 		}
 
 		public void RemoveEdges()
@@ -706,6 +722,8 @@ namespace GraphProcessor
 			if (!pinnedElements.ContainsKey(type))
 			{
 				view = Activator.CreateInstance(type) as PinnedElementView;
+				if (view == null)
+					return ;
 				pinnedElements[type] = view;
 				view.InitializeGraphView(elem, this);
 			}

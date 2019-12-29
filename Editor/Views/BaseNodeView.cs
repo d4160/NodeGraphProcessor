@@ -29,6 +29,7 @@ namespace GraphProcessor
 		protected VisualElement					debugContainer;
 
 		VisualElement							settings;
+		NodeSettingsView						settingsContainer;
 		VisualElement							settingButton;
 
 		Label									computeOrderLabel = new Label();
@@ -47,7 +48,7 @@ namespace GraphProcessor
 		[System.NonSerialized]
 		List< IconBadge >						badges = new List< IconBadge >();
 
-			#region  Initialization
+		#region  Initialization
 
 		public void Initialize(BaseGraphView owner, BaseNode node)
 		{
@@ -74,6 +75,9 @@ namespace GraphProcessor
 			RefreshExpandedState();
 
 			this.RefreshPorts();
+
+			RegisterCallback<GeometryChangedEvent>(OnGeometryChanged);
+			OnGeometryChanged(null);
 		}
 
 		void InitializePorts()
@@ -111,7 +115,24 @@ namespace GraphProcessor
 		{
 			// Initialize settings button:
 			if (hasSettings)
+			{
 				CreateSettingButton();
+				settingsContainer = new NodeSettingsView();
+				settingsContainer.visible = false;
+				settingsContainer.Add(settings);
+				Add(settingsContainer);
+
+			}
+		}
+
+		void OnGeometryChanged(GeometryChangedEvent evt)
+		{
+			if (settingButton != null)
+			{
+				var settingsButtonLayout = settingButton.ChangeCoordinatesTo(settingsContainer.parent, settingButton.layout);
+				settingsContainer.style.top = settingsButtonLayout.yMax - 18f;
+				settingsContainer.style.left = settingsButtonLayout.xMin - 26f;
+			}
 		}
 		
 		void CreateSettingButton()
@@ -136,18 +157,31 @@ namespace GraphProcessor
 		{
 			settingsExpanded = !settingsExpanded;
 			if (settingsExpanded)
+				OpenSettings();
+			else
+				CloseSettings();
+		}
+
+		public void OpenSettings()
+		{
+			if (settingsContainer != null)
 			{
-				topContainer.parent.Insert(0, settings);
 				owner.ClearSelection();
 				owner.AddToSelection(this);
 
 				settingButton.AddToClassList("clicked");
+				settingsContainer.visible = true;
+				settingsExpanded = true;
 			}
-			else
-			{
-				settings.RemoveFromHierarchy();
+		}
 
+		public void CloseSettings()
+		{
+			if (settingsContainer != null)
+			{
 				settingButton.RemoveFromClassList("clicked");
+				settingsContainer.visible = false;
+				settingsExpanded = false;
 			}
 		}
 
@@ -302,10 +336,10 @@ namespace GraphProcessor
 			badge.AttachTo(topContainer, SpriteAlignment.TopRight);
 		}
 
-		public void RemoveMessageView(string message)
+		void RemoveBadge(Func<IconBadge, bool> callback)
 		{
 			badges.RemoveAll(b => {
-				if (b.badgeText == message)
+				if (callback(b))
 				{
 					b.Detach();
 					b.RemoveFromHierarchy();
@@ -313,6 +347,20 @@ namespace GraphProcessor
 				}
 				return false;
 			});
+		}
+
+		public void RemoveMessageViewContains(string message) => RemoveBadge(b => b.badgeText.Contains(message));
+		
+		public void RemoveMessageView(string message) => RemoveBadge(b => b.badgeText == message);
+
+		public void Highlight()
+		{
+			AddToClassList("Highlight");
+		}
+
+		public void UnHighlight()
+		{
+			RemoveFromClassList("Highlight");
 		}
 
 		#endregion
