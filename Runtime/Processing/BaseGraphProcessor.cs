@@ -15,8 +15,15 @@ namespace GraphProcessor
 	public abstract class BaseGraphProcessor
 	{
 		protected BaseGraph			graph;
-		
-		/// <summary>
+
+        public void SetGraph(BaseGraph graph)
+        {
+            this.graph = graph;
+			
+			UpdateComputeOrder();
+        }
+
+        /// <summary>
 		/// Manage graph scheduling and processing
 		/// </summary>
 		/// <param name="graph">Graph to be processed</param>
@@ -25,6 +32,10 @@ namespace GraphProcessor
 			this.graph = graph;
 
 			UpdateComputeOrder();
+		}
+
+        public BaseGraphProcessor()
+        {
 		}
 
 		public abstract void UpdateComputeOrder();
