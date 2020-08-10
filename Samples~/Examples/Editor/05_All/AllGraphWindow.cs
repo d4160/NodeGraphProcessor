@@ -6,7 +6,8 @@ using GraphProcessor;
 
 public class AllGraphWindow : BaseGraphWindow
 {
-	BaseGraph	tmpGraph;
+	BaseGraph			tmpGraph;
+	CustomToolbarView	toolbarView;
 
 	[MenuItem("Window/05 All Combined")]
 	public static BaseGraphWindow OpenWithTmpGraph()
@@ -23,21 +24,29 @@ public class AllGraphWindow : BaseGraphWindow
 		return graphWindow;
 	}
 
-	protected override void OnDestroy() => DestroyImmediate(tmpGraph);
+	protected override void OnDestroy()
+	{
+		graphView?.Dispose();
+		DestroyImmediate(tmpGraph);
+	}
 
 	protected override void InitializeWindow(BaseGraph graph)
 	{
 		titleContent = new GUIContent("All Graph");
 
-		var graphView = new AllGraphView(this);
+		if (graphView == null)
+		{
+			graphView = new AllGraphView(this);
+			toolbarView = new CustomToolbarView(graphView);
+			graphView.Add(toolbarView);
+		}
 
 		rootView.Add(graphView);
-
-		graphView.Add(new CustomToolbarView(graphView));
 	}
 
 	protected override void InitializeGraphView(BaseGraphView view)
 	{
-		view.OpenPinned< ExposedParameterView >();
+		graphView.OpenPinned< ExposedParameterView >();
+		toolbarView.UpdateButtonStatus();
 	}
 }

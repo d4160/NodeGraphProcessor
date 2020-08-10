@@ -23,13 +23,18 @@ public class DefaultGraphWindow : BaseGraphWindow
 		return graphWindow;
 	}
 
-	protected override void OnDestroy() => DestroyImmediate(tmpGraph);
+	protected override void OnDestroy()
+	{
+		graphView?.Dispose();
+		DestroyImmediate(tmpGraph);
+	}
 
 	protected override void InitializeWindow(BaseGraph graph)
 	{
 		titleContent = new GUIContent("Default Graph");
 
-		var graphView = new BaseGraphView(this);
+		if (graphView == null)
+			graphView = new BaseGraphView(this);
 
 		rootView.Add(graphView);
 	}

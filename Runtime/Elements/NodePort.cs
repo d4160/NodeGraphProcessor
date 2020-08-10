@@ -1,3 +1,5 @@
+// #define DEBUG_LAMBDA
+
 using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
@@ -32,6 +34,10 @@ namespace GraphProcessor
 		/// Port size, will also affect the size of the connected edge
 		/// </summary>
 		public int		sizeInPixel;
+		/// <summary>
+		/// Tooltip of the port
+		/// </summary>
+		public string	tooltip;
 
         public bool Equals(PortData other)
         {
@@ -39,7 +45,8 @@ namespace GraphProcessor
 				&& displayName == other.displayName
 				&& displayType == other.displayType
 				&& acceptMultipleEdges == other.acceptMultipleEdges
-				&& sizeInPixel == other.sizeInPixel;
+				&& sizeInPixel == other.sizeInPixel
+				&& tooltip == other.tooltip;
         }
 
 		public void CopyFrom(PortData other)
@@ -49,6 +56,7 @@ namespace GraphProcessor
 			displayType = other.displayType;
 			acceptMultipleEdges = other.acceptMultipleEdges;
 			sizeInPixel = other.sizeInPixel;
+			tooltip = other.tooltip;
 		}
     }
 
@@ -77,6 +85,11 @@ namespace GraphProcessor
 		Dictionary< SerializableEdge, PushDataDelegate >	pushDataDelegates = new Dictionary< SerializableEdge, PushDataDelegate >();
 		List< SerializableEdge >	edgeWithRemoteCustomIO = new List< SerializableEdge >();
 
+		/// <summary>
+		/// Owner of the FieldInfo, to be used in case of Get/SetValue
+		/// </summary>
+		public object				fieldOwner;
+
 		CustomPortIODelegate		customPortIOMethod;
 
 		/// <summary>
@@ -92,14 +105,25 @@ namespace GraphProcessor
 		/// <param name="owner">owner node</param>
 		/// <param name="fieldName">the C# property name</param>
 		/// <param name="portData">Data of the port</param>
-		public NodePort(BaseNode owner, string fieldName, PortData portData)
+		public NodePort(BaseNode owner, string fieldName, PortData portData) : this(owner, owner, fieldName, portData) {}
+
+		/// <summary>
+		/// Constructor
+		/// </summary>
+		/// <param name="owner">owner node</param>
+		/// <param name="fieldOwner"></param>
+		/// <param name="fieldName">the C# property name</param>
+		/// <param name="portData">Data of the port</param>
+		public NodePort(BaseNode owner, object fieldOwner, string fieldName, PortData portData)
 		{
 			this.fieldName = fieldName;
-			this.owner = owner;
-			this.portData = portData;
+			this.owner     = owner;
+			this.portData  = portData;
+			this.fieldOwner = fieldOwner;
 
-			fieldInfo = owner.GetType().GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-
+			fieldInfo = fieldOwner.GetType().GetField(
+				fieldName,
+				BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 			customPortIOMethod = CustomPortIO.GetCustomPortMethod(owner.GetType(), fieldName);
 		}
 
@@ -140,20 +164,41 @@ namespace GraphProcessor
 				//Creation of the delegate to move the data from the input node to the output node:
 				FieldInfo inputField = edge.inputNode.GetType().GetField(edge.inputFieldName, BindingFlags.Public | BindingFlags.Instance);
 				FieldInfo outputField = edge.outputNode.GetType().GetField(edge.outputFieldName, BindingFlags.Public | BindingFlags.Instance);
+				Type inType, outType;
+
+#if DEBUG_LAMBDA
+				return new PushDataDelegate(() => {
+					var outValue = outputField.GetValue(edge.outputNode);
+					inType = edge.inputPort.portData.displayType ?? inputField.FieldType;
+					outType = edge.outputPort.portData.displayType ?? outputField.FieldType;
+					Debug.Log($"Push: {inType}({outValue}) -> {outType} | {owner.name}");
+
+					object convertedValue = outValue;
+					if (TypeAdapter.AreAssignable(outType, inType))
+					{
+						var convertionMethod = TypeAdapter.GetConvertionMethod(outType, inType);
+						Debug.Log("Convertion method: " + convertionMethod.Name);
+						convertedValue = convertionMethod.Invoke(null, new object[]{ outValue });
+					}
+
+					inputField.SetValue(edge.inputNode, convertedValue);
+				});
+#endif
 
 // We keep slow checks inside the editor
 #if UNITY_EDITOR
 				if (!BaseGraph.TypesAreConnectable(inputField.FieldType, outputField.FieldType))
 				{
 					Debug.LogError("Can't convert from " + inputField.FieldType + " to " + outputField.FieldType + ", you must specify a custom port function (i.e CustomPortInput or CustomPortOutput) for non-implicit convertions");
+					return null;
 				}
 #endif
 
 				Expression inputParamField = Expression.Field(Expression.Constant(edge.inputNode), inputField);
 				Expression outputParamField = Expression.Field(Expression.Constant(edge.outputNode), outputField);
 
-				var inType = edge.inputPort.portData.displayType ?? inputField.FieldType;
-				var outType = edge.outputPort.portData.displayType ?? outputField.FieldType;
+				inType = edge.inputPort.portData.displayType ?? inputField.FieldType;
+				outType = edge.outputPort.portData.displayType ?? outputField.FieldType;
 
 				// If there is a user defined convertion function, then we call it
 				if (TypeAdapter.AreAssignable(outType, inType))
@@ -186,6 +231,7 @@ namespace GraphProcessor
 				return;
 
 			pushDataDelegates.Remove(edge);
+			edgeWithRemoteCustomIO.Remove(edge);
 			edges.Remove(edge);
 		}
 
@@ -214,7 +260,7 @@ namespace GraphProcessor
 				return ;
 
 			//if there are custom IO implementation on the other ports, they'll need our value in the passThrough buffer
-			object ourValue = fieldInfo.GetValue(owner);
+			object ourValue = fieldInfo.GetValue(fieldOwner);
 			foreach (var edge in edgeWithRemoteCustomIO)
 				edge.passThroughBuffer = ourValue;
 		}
@@ -226,9 +272,14 @@ namespace GraphProcessor
 		{
 			// When type is nullable, we set it to null instead of allocating a dummy class
 			if (fieldInfo.FieldType.GetTypeInfo().IsClass)
-				fieldInfo.SetValue(owner, null);
+				fieldInfo.SetValue(fieldOwner, null);
 			else
-				fieldInfo.SetValue(owner, Activator.CreateInstance(fieldInfo.FieldType));
+			{
+				try
+				{
+					fieldInfo.SetValue(fieldOwner, Activator.CreateInstance(fieldInfo.FieldType));
+				} catch {} // Catch types that don't have any constructors
+			}
 		}
 
 		/// <summary>
@@ -250,7 +301,7 @@ namespace GraphProcessor
 			// Only one input connection is handled by this code, if you want to
 			// take multiple inputs, you must create a custom input function see CustomPortsNode.cs
 			if (edges.Count > 0)
-				fieldInfo.SetValue(owner, edges.First().passThroughBuffer);
+				fieldInfo.SetValue(fieldOwner, edges.First().passThroughBuffer);
 		}
 	}
 

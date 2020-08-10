@@ -1,7 +1,7 @@
 {
     "name": "com.alelievr.node-graph-processor",
     "displayName": "Node Graph Processor",
-    "version": "0.6.1",
+    "version": "0.7.11",
     "unity": "2019.3",
     "description": "Node graph editor framework focused on data processing using Unity UIElements and C# 4.7",
     "keywords": [
@@ -13,7 +13,7 @@
        {
          "displayName": "Examples",
          "description": "A bunch of examples using the NodeGraphProcessor API to create custom nodes and graphs",
-         "path": "Samples~/Examples"
+         "path": "Samples~"
        }
      ],
     "category": "Unity"

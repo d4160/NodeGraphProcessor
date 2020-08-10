@@ -8,6 +8,7 @@ using System;
 [System.Serializable, NodeMenuItem("Custom/Relay")]
 public class RelayNode : BaseNode
 {
+	[HideInInspector]
 	public struct PackedRelayData
 	{
 		public List<object>	values;
@@ -58,12 +59,12 @@ public class RelayNode : BaseNode
 	public void GetInputs(List< SerializableEdge > edges)
 	{
 		inputEdgeCount = edges.Count;
-		UpdateAllPorts();
 
 		// If the relay is only connected to another relay:
 		if (edges.Count == 1 && edges.First().outputNode.GetType() == typeof(RelayNode))
 		{
-			input = (PackedRelayData)edges.First().passThroughBuffer;
+			if (edges.First().passThroughBuffer != null)
+				input = (PackedRelayData)edges.First().passThroughBuffer;
 		}
 		else
 		{
@@ -82,7 +83,7 @@ public class RelayNode : BaseNode
 
 		var inputPortEdges = inputPorts[0].GetEdges();
 
-		if (unpackOutput && inputPortEdges.Count == 1)
+		if (unpackOutput || inputPortEdges.Count == 1)
 		{
 			// When we unpack the output, there is one port per type of data in output
 			// That means that this function will be called the same number of time than the output port count
@@ -90,7 +91,10 @@ public class RelayNode : BaseNode
 			object data = output.values[outputIndex++];
 
 			foreach (var edge in edges)
-				edge.passThroughBuffer = data;
+			{
+				var destinationIsRelay = edge.inputNode is RelayNode;
+				edge.passThroughBuffer = destinationIsRelay ? output : data;
+			}
 		}
 		else
 		{
@@ -98,6 +102,8 @@ public class RelayNode : BaseNode
 				edge.passThroughBuffer = output;
 		}
 	}
+
+	SerializableType inputType = new SerializableType(typeof(object));
 
 	[CustomPortBehavior(nameof(input))]
 	IEnumerable< PortData > InputPortBehavior(List< SerializableEdge > edges)
@@ -110,10 +116,15 @@ public class RelayNode : BaseNode
 			var inputEdges = inputPorts[0]?.GetEdges();
 			sizeInPixel = inputEdges.Sum(e => Mathf.Max(0, e.outputPort.portData.sizeInPixel - 8));
 		}
+		
+		if (edges.Count == 1)
+			inputType.type = edges[0].outputPort.portData.displayType;
+		else
+			inputType.type = typeof(object);
 
 		yield return new PortData {
 			displayName = "",
-			displayType = typeof(object),
+			displayType = inputType.type,
 			identifier = "0",
 			acceptMultipleEdges = true,
 			sizeInPixel = Mathf.Min(k_MaxPortSize, sizeInPixel + 8),
@@ -142,7 +153,7 @@ public class RelayNode : BaseNode
 		{
 			yield return new PortData {
 				displayName = "",
-				displayType = typeof(object),
+				displayType = inputType.type,
 				identifier = "0",
 				acceptMultipleEdges = true,
 				sizeInPixel = Mathf.Min(k_MaxPortSize, Mathf.Max(underlyingPortData.Count, 1) + 7),

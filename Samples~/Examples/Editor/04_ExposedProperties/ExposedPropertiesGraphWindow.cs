@@ -23,13 +23,18 @@ public class ExposedPropertiesGraphWindow : BaseGraphWindow
 		return graphWindow;
 	}
 
-	protected override void OnDestroy() => DestroyImmediate(tmpGraph);
+	protected override void OnDestroy()
+	{
+		graphView?.Dispose();
+		DestroyImmediate(tmpGraph);
+	}
 
 	protected override void InitializeWindow(BaseGraph graph)
 	{
 		titleContent = new GUIContent("Properties Graph");
 
-		var graphView = new ExposedPropertiesGraphView(this);
+		if (graphView == null)
+			graphView = new ExposedPropertiesGraphView(this);
 
 		rootView.Add(graphView);
 	}

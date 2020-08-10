@@ -5,6 +5,7 @@ using UnityEditor.Experimental.GraphView;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;
 using GraphProcessor;
+using NodeGraphProcessor.Examples;
 
 public class ConditionalProcessorView : PinnedElementView
 {
