@@ -103,7 +103,7 @@ namespace GraphProcessor
 		public virtual bool			needsInspector => _needsInspector;
 
 		[NonSerialized]
-		Dictionary< string, NodeFieldInformation >	nodeFields = new Dictionary< string, NodeFieldInformation >();
+		internal Dictionary< string, NodeFieldInformation >	nodeFields = new Dictionary< string, NodeFieldInformation >();
 
 		[NonSerialized]
 		List< string >				messages = new List< string >();
@@ -111,7 +111,7 @@ namespace GraphProcessor
 		[NonSerialized]
 		protected BaseGraph			graph;
 
-		class NodeFieldInformation
+		internal class NodeFieldInformation
 		{
 			public string						name;
 			public string						fieldName;
@@ -194,8 +194,7 @@ namespace GraphProcessor
 
 		internal void InitializePorts()
 		{
-
-			foreach (var nodeFieldKP in nodeFields)
+			foreach (var nodeFieldKP in nodeFields.ToList().OrderByDescending(kp => kp.Value.info.MetadataToken))
 			{
 				var nodeField = nodeFieldKP.Value;
 
@@ -209,7 +208,6 @@ namespace GraphProcessor
 					AddPort(nodeField.input, nodeField.fieldName, new PortData { acceptMultipleEdges = nodeField.isMultiple, displayName = nodeField.name, tooltip = nodeField.tooltip });
 				}
 			}
-
 		}
 
 		protected BaseNode()
@@ -302,6 +300,17 @@ namespace GraphProcessor
 					}
 				}
 			}
+
+			// Make sure the port order is correct:
+			portCollection.Sort((p1, p2) => {
+				int p1Index = finalPorts.FindIndex(id => p1.portData.identifier == id);
+				int p2Index = finalPorts.FindIndex(id => p2.portData.identifier == id);
+
+				if (p1Index == -1 || p2Index == -1)
+					return 0;
+
+				return p1Index.CompareTo(p2Index);
+			});
 
 			onPortsUpdated?.Invoke(fieldName);
 
