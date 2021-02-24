@@ -19,7 +19,12 @@ namespace GraphProcessor
 		/// </summary>
 		/// <returns></returns>
 		public virtual string       name => GetType().Name;
-
+		
+		/// <summary>
+		/// The accent color of the node
+		/// </summary>
+		public virtual Color color => Color.clear;
+		
 		/// <summary>
 		/// Set a custom uss file for the node. We use a Resources.Load to get the stylesheet so be sure to put the correct resources path
 		/// https://docs.unity3d.com/ScriptReference/Resources.Load.html
@@ -46,6 +51,9 @@ namespace GraphProcessor
 
 		/// <summary>Show the node controlContainer only when the mouse is over the node</summary>
 		public virtual bool			showControlsOnHover => false;
+
+		/// <summary>True if the node can be deleted, false otherwise</summary>
+		public virtual bool			deletable => true;
 
 		/// <summary>
 		/// Container of input ports
@@ -110,7 +118,7 @@ namespace GraphProcessor
 		internal Dictionary< Type, CustomPortTypeBehaviorDelegate> customPortTypeBehaviorMap = new Dictionary<Type, CustomPortTypeBehaviorDelegate>();
 
 		[NonSerialized]
-		List< string >				messages = new List< string >();
+		List< string >				messages = new List<string>();
 
 		[NonSerialized]
 		protected BaseGraph			graph;
@@ -124,8 +132,9 @@ namespace GraphProcessor
 			public bool							isMultiple;
 			public string						tooltip;
 			public CustomPortBehaviorDelegate	behavior;
+			public bool							vertical;
 
-			public NodeFieldInformation(FieldInfo info, string name, bool input, bool isMultiple, string tooltip, CustomPortBehaviorDelegate behavior)
+			public NodeFieldInformation(FieldInfo info, string name, bool input, bool isMultiple, string tooltip, bool vertical, CustomPortBehaviorDelegate behavior)
 			{
 				this.input = input;
 				this.isMultiple = isMultiple;
@@ -134,6 +143,7 @@ namespace GraphProcessor
 				this.fieldName = info.Name;
 				this.behavior = behavior;
 				this.tooltip = tooltip;
+				this.vertical = vertical;
 			}
 		}
 
@@ -250,15 +260,15 @@ namespace GraphProcessor
 				else
 				{
 					// If we don't have a custom behavior on the node, we just have to create a simple port
-					AddPort(nodeField.input, nodeField.fieldName, new PortData { acceptMultipleEdges = nodeField.isMultiple, displayName = nodeField.name, tooltip = nodeField.tooltip });
+					AddPort(nodeField.input, nodeField.fieldName, new PortData { acceptMultipleEdges = nodeField.isMultiple, displayName = nodeField.name, tooltip = nodeField.tooltip, vertical = nodeField.vertical });
 				}
 			}
 		}
 
 		protected BaseNode()
 		{
-			inputPorts = new NodeInputPortContainer(this);
-			outputPorts = new NodeOutputPortContainer(this);
+            inputPorts = new NodeInputPortContainer(this);
+            outputPorts = new NodeOutputPortContainer(this);
 
 			InitializeInOutDatas();
 		}
@@ -473,6 +483,7 @@ namespace GraphProcessor
 				var outputAttribute = field.GetCustomAttribute< OutputAttribute >();
 				var tooltipAttribute = field.GetCustomAttribute< TooltipAttribute >();
 				var showInInspector = field.GetCustomAttribute< ShowInInspector >();
+				var vertical = field.GetCustomAttribute< VerticalAttribute >();
 				bool isMultiple = false;
 				bool input = false;
 				string name = field.Name;
@@ -495,7 +506,7 @@ namespace GraphProcessor
 					name = outputAttribute.name;
 
 				// By default we set the behavior to null, if the field have a custom behavior, it will be set in the loop just below
-				nodeFields[field.Name] = new NodeFieldInformation(field, name, input, isMultiple, tooltip, null);
+				nodeFields[field.Name] = new NodeFieldInformation(field, name, input, isMultiple, tooltip, vertical != null, null);
 			}
 
 			foreach (var method in methods)
@@ -702,6 +713,29 @@ namespace GraphProcessor
 				var bothNull = String.IsNullOrEmpty(identifier) && String.IsNullOrEmpty(p.portData.identifier);
 				return p.fieldName == fieldName && (bothNull || identifier == p.portData.identifier);
 			});
+		}
+
+		/// <summary>
+		/// Return all the ports of the node
+		/// </summary>
+		/// <returns></returns>
+		public IEnumerable<NodePort> GetAllPorts()
+		{
+			foreach (var port in inputPorts)
+				yield return port;
+			foreach (var port in outputPorts)
+				yield return port;
+		}
+
+		/// <summary>
+		/// Return all the connected edges of the node
+		/// </summary>
+		/// <returns></returns>
+		public IEnumerable<SerializableEdge> GetAllEdges()
+		{
+			foreach (var port in GetAllPorts())
+				foreach (var edge in port.GetEdges())
+					yield return edge;
 		}
 
 		/// <summary>

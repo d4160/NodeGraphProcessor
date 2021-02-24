@@ -103,7 +103,7 @@ namespace GraphProcessor
 		/// Same event than BaseGraph.onExposedParameterModified
 		/// Safe event (not triggered in case the graph is null).
 		/// </summary>
-		public event Action< string >	onExposedParameterModified;
+		public event Action< ExposedParameter >	onExposedParameterModified;
 
 		/// <summary>
 		/// Triggered when a node is duplicated (crt-d) or copy-pasted (crtl-c/crtl-v)
@@ -115,6 +115,13 @@ namespace GraphProcessor
 		/// </summary>
 		[NonSerialized]
 		protected NodeInspectorObject		nodeInspector;
+
+		/// <summary>
+		/// Workaround object for creating exposed parameter property fields.
+		/// </summary>
+		public ExposedParameterFieldFactory exposedParameterFactory { get; private set; }
+
+		public SerializedObject		serializedGraph { get; private set; }
 
 		public BaseGraphView(EditorWindow window)
 		{
@@ -172,7 +179,17 @@ namespace GraphProcessor
 			var data = new CopyPasteHelper();
 
 			foreach (BaseNodeView nodeView in elements.Where(e => e is BaseNodeView))
+			{
 				data.copiedNodes.Add(JsonSerializer.SerializeNode(nodeView.nodeTarget));
+				foreach (var port in nodeView.nodeTarget.GetAllPorts())
+				{
+					if (port.portData.vertical)
+					{
+						foreach (var edge in port.GetEdges())
+							data.copiedEdges.Add(JsonSerializer.Serialize(edge));
+					}
+				}
+			}
 
 			foreach (GroupView groupView in elements.Where(e => e is GroupView))
 				data.copiedGroups.Add(JsonSerializer.Serialize(groupView.group));
@@ -282,19 +299,22 @@ namespace GraphProcessor
 
 				if (nodeViewsPerNode.ContainsKey(oldInputNode) && nodeViewsPerNode.ContainsKey(oldOutputNode))
 				{
-					var edgeView = new EdgeView()
-					{
-						userData = newEdge,
-						input = nodeViewsPerNode[oldInputNode].GetPortViewFromFieldName(newEdge.inputFieldName, newEdge.inputPortIdentifier),
-						output = nodeViewsPerNode[oldOutputNode].GetPortViewFromFieldName(newEdge.outputFieldName, newEdge.outputPortIdentifier)
-					};
+					var edgeView = CreateEdgeView();
+					edgeView.userData = newEdge;
+					edgeView.input = nodeViewsPerNode[oldInputNode].GetPortViewFromFieldName(newEdge.inputFieldName, newEdge.inputPortIdentifier);
+					edgeView.output = nodeViewsPerNode[oldOutputNode].GetPortViewFromFieldName(newEdge.outputFieldName, newEdge.outputPortIdentifier);
 
 					Connect(edgeView);
 				}
 			}
 		}
 
-		GraphViewChange GraphViewChangedCallback(GraphViewChange changes)
+        public virtual EdgeView CreateEdgeView()
+        {
+			return new EdgeView();
+        }
+
+        GraphViewChange GraphViewChangedCallback(GraphViewChange changes)
 		{
 			if (changes.elementsToRemove != null)
 			{
@@ -322,27 +342,38 @@ namespace GraphProcessor
 							Disconnect(edge);
 							return true;
 						case BaseNodeView nodeView:
+							// For vertical nodes, we need to delete them ourselves as it's not handled by GraphView
+							foreach (var pv in nodeView.inputPortViews.Concat(nodeView.outputPortViews))
+								if (pv.orientation == Orientation.Vertical)
+									foreach (var edge in pv.GetEdges().ToList())
+										Disconnect(edge);
+
 							nodeInspector.NodeViewRemoved(nodeView);
 							ExceptionToLog.Call(() => nodeView.OnRemoved());
 							graph.RemoveNode(nodeView.nodeTarget);
+							UpdateSerializedProperties();
 							RemoveElement(nodeView);
 							if (Selection.activeObject == nodeInspector)
 								UpdateNodeInspectorSelection();
 							return true;
 						case GroupView group:
 							graph.RemoveGroup(group.group);
+							UpdateSerializedProperties();
 							RemoveElement(group);
 							return true;
 						case ExposedParameterFieldView blackboardField:
 							graph.RemoveExposedParameter(blackboardField.parameter);
+							UpdateSerializedProperties();
 							return true;
 						case BaseStackNodeView stackNodeView:
 							graph.RemoveStackNode(stackNodeView.stackNode);
+							UpdateSerializedProperties();
 							RemoveElement(stackNodeView);
 							return true;
 #if UNITY_2020_1_OR_NEWER
 						case StickyNoteView stickyNoteView:
 							graph.RemoveStickyNote(stickyNoteView.note);
+							UpdateSerializedProperties();
 							RemoveElement(stickyNoteView);
 							return true;
 #endif
@@ -601,7 +632,7 @@ namespace GraphProcessor
 
 		void ReloadView()
 		{
-			// Force the graph to reload his datas (Undo have updated the serialized properties of the graph
+			// Force the graph to reload his data (Undo have updated the serialized properties of the graph
 			// so the one that are not serialized need to be synchronized)
 			graph.Deserialize();
 
@@ -621,6 +652,8 @@ namespace GraphProcessor
 			RemoveStrickyNotes();
 #endif
 			RemoveStackNodeViews();
+
+			UpdateSerializedProperties();
 
 			// And re-add with new up to date datas
 			InitializeNodeViews();
@@ -654,6 +687,10 @@ namespace GraphProcessor
 			}
 
 			this.graph = graph;
+
+			exposedParameterFactory = new ExposedParameterFieldFactory(graph);
+
+			UpdateSerializedProperties();
 
             connectorListener = CreateEdgeConnectorListener();
 
@@ -690,6 +727,11 @@ namespace GraphProcessor
 #endif
 		}
 
+		void UpdateSerializedProperties()
+		{
+			serializedGraph = new SerializedObject(graph);
+		}
+
 		/// <summary>
 		/// Allow you to create your own edge connector listener
 		/// </summary>
@@ -699,12 +741,18 @@ namespace GraphProcessor
 
 		void InitializeGraphView()
 		{
-			graph.onExposedParameterListChanged += () => onExposedParameterListChanged?.Invoke();
+			graph.onExposedParameterListChanged += OnExposedParameterListChanged;
 			graph.onExposedParameterModified += (s) => onExposedParameterModified?.Invoke(s);
 			graph.onGraphChanges += GraphChangesCallback;
 			viewTransform.position = graph.position;
 			viewTransform.scale = graph.scale;
 			nodeCreationRequest = (c) => SearchWindow.Open(new SearchWindowContext(c.screenMousePosition), createNodeMenu);
+		}
+
+		void OnExposedParameterListChanged()
+		{
+			UpdateSerializedProperties();
+			onExposedParameterListChanged?.Invoke();
 		}
 
 		void InitializeNodeViews()
@@ -729,11 +777,11 @@ namespace GraphProcessor
 				if (inputNodeView == null || outputNodeView == null)
 					continue;
 
-				var edgeView = new EdgeView() {
-					userData = serializedEdge,
-					input = inputNodeView.GetPortViewFromFieldName(serializedEdge.inputFieldName, serializedEdge.inputPortIdentifier),
-					output = outputNodeView.GetPortViewFromFieldName(serializedEdge.outputFieldName, serializedEdge.outputPortIdentifier)
-				};
+				var edgeView = CreateEdgeView();
+				edgeView.userData = serializedEdge;
+				edgeView.input = inputNodeView.GetPortViewFromFieldName(serializedEdge.inputFieldName, serializedEdge.inputPortIdentifier);
+				edgeView.output = outputNodeView.GetPortViewFromFieldName(serializedEdge.outputFieldName, serializedEdge.outputPortIdentifier);
+
 
 				ConnectView(edgeView);
 			}
@@ -806,6 +854,8 @@ namespace GraphProcessor
 		{
 			// This will initialize the node using the graph instance
 			graph.AddNode(node);
+
+			UpdateSerializedProperties();
 
 			var view = AddNodeView(node);
 
@@ -1050,12 +1100,11 @@ namespace GraphProcessor
 
 			var newEdge = SerializableEdge.CreateNewEdge(graph, inputPort, outputPort);
 
-			var edgeView = new EdgeView()
-			{
-				userData = newEdge,
-				input = inputPortView,
-				output = outputPortView,
-			};
+			var edgeView = CreateEdgeView();
+			edgeView.userData = newEdge;
+			edgeView.input = inputPortView;
+			edgeView.output = outputPortView;
+
 
 			return Connect(edgeView);
 		}
@@ -1260,6 +1309,12 @@ namespace GraphProcessor
 			Undo.undoRedoPerformed -= ReloadView;
 			Object.DestroyImmediate(nodeInspector);
 			NodeProvider.UnloadGraph(graph);
+			exposedParameterFactory.Dispose();
+			exposedParameterFactory = null;
+
+			graph.onExposedParameterListChanged -= OnExposedParameterListChanged;
+			graph.onExposedParameterModified += (s) => onExposedParameterModified?.Invoke(s);
+			graph.onGraphChanges -= GraphChangesCallback;
         }
 
         #endregion
