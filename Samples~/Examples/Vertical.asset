@@ -190,7 +190,10 @@ MonoBehaviour:
         nodeLock: 0
         output: 0
         input: 0
+<<<<<<< HEAD
         input2: 0
+=======
+>>>>>>> c9043a808fa17b4129a4716a47ad1eda6ac80623
     00000005:
       type: {class: VerticalNode, ns: , asm: Assembly-CSharp}
       data:
@@ -225,7 +228,10 @@ MonoBehaviour:
         nodeLock: 0
         output: 0
         input: 0
+<<<<<<< HEAD
         input2: 0
+=======
+>>>>>>> c9043a808fa17b4129a4716a47ad1eda6ac80623
     00000007:
       type: {class: VerticalNode2, ns: , asm: Assembly-CSharp}
       data:
@@ -308,4 +314,7 @@ MonoBehaviour:
         nodeLock: 0
         output: 0
         input: 0
+<<<<<<< HEAD
         input2: 0
+=======
+>>>>>>> c9043a808fa17b4129a4716a47ad1eda6ac80623

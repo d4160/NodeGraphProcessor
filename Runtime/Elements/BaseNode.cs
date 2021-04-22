@@ -14,6 +14,9 @@ namespace GraphProcessor
 	[Serializable]
 	public abstract class BaseNode
 	{
+		[SerializeField]
+		internal string nodeCustomName = null; // The name of the node in case it was renamed by a user
+
 		/// <summary>
 		/// Name of the node, it will be displayed in the title section
 		/// </summary>
@@ -110,6 +113,11 @@ namespace GraphProcessor
 		/// Does the node needs to be visible in the inspector (when selected).
 		/// </summary>
 		public virtual bool			needsInspector => _needsInspector;
+
+		/// <summary>
+		/// Can the node be renamed in the UI. By default a node can be renamed by double clicking it's name.
+		/// </summary>
+		public virtual bool			isRenamable => false;
 
 		[NonSerialized]
 		internal Dictionary< string, NodeFieldInformation >	nodeFields = new Dictionary< string, NodeFieldInformation >();
@@ -249,13 +257,13 @@ namespace GraphProcessor
 		{
 			InitializeCustomPortTypeMethods();
 
-			foreach (var nodeFieldKP in nodeFields.ToList().OrderByDescending(kp => kp.Value.info.MetadataToken))
+			foreach (var key in OverrideFieldOrder(nodeFields.Values.Select(k => k.info)))
 			{
-				var nodeField = nodeFieldKP.Value;
+				var nodeField = nodeFields[key.Name];
 
 				if (HasCustomBehavior(nodeField))
 				{
-					UpdatePortsForField(nodeField.fieldName);
+					UpdatePortsForField(nodeField.fieldName, sendPortUpdatedEvent: false);
 				}
 				else
 				{
@@ -263,6 +271,30 @@ namespace GraphProcessor
 					AddPort(nodeField.input, nodeField.fieldName, new PortData { acceptMultipleEdges = nodeField.isMultiple, displayName = nodeField.name, tooltip = nodeField.tooltip, vertical = nodeField.vertical });
 				}
 			}
+		}
+
+		/// <summary>
+		/// Override the field order inside the node. It allows to re-order all the ports and field in the UI.
+		/// </summary>
+		/// <param name="fields">List of fields to sort</param>
+		/// <returns>Sorted list of fields</returns>
+		public virtual IEnumerable<FieldInfo> OverrideFieldOrder(IEnumerable<FieldInfo> fields)
+		{
+			long GetFieldInheritanceLevel(FieldInfo f)
+			{
+				int level = 0;
+				var t = f.DeclaringType;
+				while (t != null)
+				{
+					t = t.BaseType;
+					level++;
+				}
+
+				return level;
+			}
+
+			// Order by MetadataToken and inheritance level to sync the order with the port order (make sure FieldDrawers are next to the correct port)
+			return fields.OrderByDescending(f => (long)(((GetFieldInheritanceLevel(f) << 32)) | (long)f.MetadataToken));
 		}
 
 		protected BaseNode()
@@ -280,8 +312,11 @@ namespace GraphProcessor
 		{
 			bool changed = false;
 
-			foreach (var field in nodeFields)
-				changed |= UpdatePortsForField(field.Value.fieldName);
+			foreach (var key in OverrideFieldOrder(nodeFields.Values.Select(k => k.info)))
+			{
+				var field = nodeFields[key.Name];
+				changed |= UpdatePortsForField(field.fieldName);
+			}
 
 			return changed;
 		}
@@ -293,8 +328,11 @@ namespace GraphProcessor
 		{
 			bool changed = false;
 
-			foreach (var field in nodeFields)
-				changed |= UpdatePortsForFieldLocal(field.Value.fieldName);
+			foreach (var key in OverrideFieldOrder(nodeFields.Values.Select(k => k.info)))
+			{
+				var field = nodeFields[key.Name];
+				changed |= UpdatePortsForFieldLocal(field.fieldName);
+			}
 
 			return changed;
 		}
@@ -304,7 +342,7 @@ namespace GraphProcessor
 		/// Update the ports related to one C# property field (only for this node)
 		/// </summary>
 		/// <param name="fieldName"></param>
-		public bool UpdatePortsForFieldLocal(string fieldName)
+		public bool UpdatePortsForFieldLocal(string fieldName, bool sendPortUpdatedEvent = true)
 		{
 			bool changed = false;
 
@@ -394,7 +432,8 @@ namespace GraphProcessor
 				return p1Index.CompareTo(p2Index);
 			});
 
-			onPortsUpdated?.Invoke(fieldName);
+			if (sendPortUpdatedEvent)
+				onPortsUpdated?.Invoke(fieldName);
 
 			return changed;
 		}
@@ -414,7 +453,7 @@ namespace GraphProcessor
 		/// Update the ports related to one C# property field and all connected nodes in the graph
 		/// </summary>
 		/// <param name="fieldName"></param>
-		public bool UpdatePortsForField(string fieldName)
+		public bool UpdatePortsForField(string fieldName, bool sendPortUpdatedEvent = true)
 		{
 			bool changed  = false;
 
@@ -437,7 +476,7 @@ namespace GraphProcessor
 
 				foreach (var field in fields)
 				{
-					if (node.UpdatePortsForFieldLocal(field))
+					if (node.UpdatePortsForFieldLocal(field, sendPortUpdatedEvent))
 					{
 						foreach (var port in node.IsFieldInput(field) ? (NodePortContainer)node.inputPorts : node.outputPorts)
 						{
@@ -461,7 +500,15 @@ namespace GraphProcessor
 
 		HashSet<BaseNode> portUpdateHashSet = new HashSet<BaseNode>();
 
-		internal void DisableInternal() => ExceptionToLog.Call(() => Disable());
+		internal void DisableInternal()
+		{
+			// port containers are initialized in the OnEnable
+			inputPorts.Clear();
+			outputPorts.Clear();
+
+			ExceptionToLog.Call(() => Disable());
+		}
+
 		internal void DestroyInternal() => ExceptionToLog.Call(() => Destroy());
 
 		/// <summary>
@@ -789,6 +836,19 @@ namespace GraphProcessor
 				onMessageRemoved?.Invoke(message);
 			messages.Clear();
 		}
+
+		/// <summary>
+		/// Set the custom name of the node. This is intended to be used by renamable nodes.
+		/// This custom name will be serialized inside the node.
+		/// </summary>
+		/// <param name="customNodeName">New name of the node.</param>
+		public void SetCustomName(string customName) => nodeCustomName = customName;
+
+		/// <summary>
+		/// Get the name of the node. If the node have a custom name (set using the UI by double clicking on the node title) then it will return this name first, otherwise it returns the value of the name field.
+		/// </summary>
+		/// <returns>The name of the node as written in the title</returns>
+		public string GetCustomName() => String.IsNullOrEmpty(nodeCustomName) ? name : nodeCustomName; 
 
 		#endregion
 	}
